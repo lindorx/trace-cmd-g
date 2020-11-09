@@ -9,9 +9,9 @@ import time
 import pickle
 from pathlib import Path
 from matplotlib.pyplot import MultipleLocator
+
+
 # 小数截取
-
-
 def cutdec(number1, num):
     return float(str(number1).split('.')[0]+'.'+str(number1).split('.')[1][:num])
 
@@ -26,16 +26,32 @@ def process_bar(percent, start_str='', end_str='', total_length=0):
         ' {:0>4.1f}%|'.format(percent*100) + end_str
     print(bar, end='', flush=True)
 
-# 统计数据
-# tracedatl：一个3*n的数组，tracedatl[0]为所在cpu，tracedatl[1]为采样时间，tracedatl[2]为函数名
-# timesec：统计间隔数组
-# funnames：函数名数组，为tracedatl[2]中所有存在的函数
 
+#全局变量
+inputfile = ''          #输入文件，后缀名“.dat”
+outputfile = ''         #输出文件，图片，后缀名“.jpg”，指定是无需指定后缀名
+tmpfile = ''            #中间文件，对“.dat”处理过的文件，过滤了不需要的部分
+varfile = ''            #变量文件，保存的主要数据，加快处理速度
+one_picture = True      #如果将所有曲线先是在一个图片中，one_picture = True ，反之，分散到各个图片中
+time_intervial = 0.1    #数据的时间间隔，单位：秒
+plot_display = False    #直接显示处理好的图片
+cpus = []               #cpu数组，指定要处理的cpu
+line_range = [0,0]      #设定范围，line_range[0]表示起始位置，line_range[1]表示终止位置
+open_cmd = False        #启用命令，允许进行实时处理
 
-def statistical_data(tracedatl, timesec, event):
+event_list = []         #事件列表
+fun_list = []           #函数列表
+tracedatl=[]            #tracedatl[0]为cpu数组，数组tracedatl[1]为采样时间的数组，tracedatl[2]为对应的事件
+timesec=[]              #图片x轴的刻度数据
+events=[]               #当前处理的数据包含的全部事件
+stats_array=[]          #处理好的统计数据
+allcpu_stats_array=[]   #所有cpu的合并结果
+
+#统计数据
+def statistical_data():
     # 创建一个二维数组，用于记录每个函数在每秒的执行次数
-    funnamenum = np.zeros(
-        [np.max(tracedatl[0])+1, len(event), len(timesec)], dtype=int, order='C')
+    stats_array = np.zeros(
+        [np.max(tracedatl[0])+1, len(events), len(timesec)], dtype=int, order='C')
     # 统计每个函数在每秒出现的时间，并置入funnamenum
     # x表示行，y表示列
     x, y, item = 0, 1, 0
@@ -45,10 +61,10 @@ def statistical_data(tracedatl, timesec, event):
             y += 1
         # 逐个判断函数名
         x = 0
-        for name in event:
+        for name in events:
             if name == tracedatl[2][item]:
                 # 找到文件名，令其在funnamenum数组中对应的值加一
-                funnamenum[tracedatl[0][item]][x][y] += 1
+                stats_array[tracedatl[0][item]][x][y] += 1
                 break
             x += 1
         item += 1
@@ -56,33 +72,50 @@ def statistical_data(tracedatl, timesec, event):
             process_bar(item/tmp1/100, start_str='',
                         end_str='100%', total_length=60)
     print()
-    return funnamenum
+    return stats_array
+
+#变量初始化，部分变量已在main()中初始化
+def init_value():
+    events = np.unique(tracedatl[2])
+    # 创建秒间隔数组
+    timesec = [cutdec(i, 6) for i in np.linspace(cutdec(tracedatl[1][0], 2), cutdec(tracedatl[1][-1], 2)+2*time_intervial,
+            int((cutdec(tracedatl[1][-1], 2)-cutdec(tracedatl[1][0], 2)+2*time_intervial)/time_intervial)+1)]
+        #获取统计数组
+    stats_array = statistical_data()
+    # 将所有cpu上的统计结果相加，获得整个进程的结果
+    allcpu_stats_array = sum(stats_array)
+    if line_range == []:
+        line_range = [1, len(timesec)-2]  #两端的统计是不准确的，所以去掉
+    if open_cmd:
+        # 进入命令处理程序
+        _cmd_1(allcpu_stats_array, timesec, events, stats_array, line_range)
+
 
 # linedata:曲线数据，即y轴；timesec：时间刻度，即x轴
-# picturefile：保存路径；funnames：函数名数组；line_range：x轴范围；time_intervial：时间间隔；one_picture：图形分离标志；plot_display：图形显示标志
+# outputfile：保存路径；funnames：函数名数组；line_range：x轴范围；time_intervial：时间间隔；one_picture：图形分离标志；plot_display：图形显示标志
 
 
-def save_show_picture(linedata, timesec, picturefile, event, line_range, time_intervial=1, one_picture=True, plot_display=False):
+def save_show_picture(linedata, timesec, outputfile, events, line_range, time_intervial=1, one_picture=True, plot_display=False):
     #fig, ax = plt.subplots(num=None, figsize=(16, 12), dpi=80, facecolor='w', edgecolor='k')
     if one_picture:  # 将所有函数曲线放到一起
         count = 0
         plt.figure(num=1, figsize=(20, 5))
         for curve in linedata:
             plt.plot(timesec[line_range[0]:line_range[1]],
-                     curve[line_range[0]:line_range[1]], label=str(event[count], 'ascii'))
+                     curve[line_range[0]:line_range[1]], label=str(events[count], 'ascii'))
             plt.legend()
             count += 1
-        picturefile += '.jpg'
-        plt.savefig(picturefile)
-        print('图片保存至\''+picturefile+'\'')
+        outputfile += '.jpg'
+        plt.savefig(outputfile)
+        print('图片保存至\''+outputfile+'\'')
     else:  # 将函数曲线分为多个图片
         count = 0
         for curve in linedata:
             plt.figure(figsize=(20, 5))
-            plt.title(event[count])
+            plt.title(events[count])
             plt.plot(timesec[line_range[0]:line_range[1]],
                      curve[line_range[0]:line_range[1]])
-            picture1 = picturefile+'-'+str(event[count], 'ascii')+'.jpg'
+            picture1 = outputfile+'-'+str(events[count], 'ascii')+'.jpg'
             plt.savefig(picture1)
             print('图片保存至\''+picture1+'\'')
             count += 1
@@ -95,12 +128,12 @@ def save_show_picture(linedata, timesec, picturefile, event, line_range, time_in
 
 
 parameter_cmd = {'show_picture': ['show'], 'show_timesec': ['timeax', 'ta'],
-                 'show_event': ['event', 'e'], 'show_function_count': ['funs'],
+                 'show_event': ['events', 'e'], 'show_function_count': ['funs'],
                  'clear': ['cle', 'clear'], 'help': ['help', 'h'],
-                 'show_fun':['fun','f']}
+                 'show_fun': ['fun', 'f']}
 
 
-def _cmd_1(linedata, timesec, event, funnamenum, line_range):
+def _cmd_1(linedata, timesec, events, stats_array, line_range):
     time_intervial = 0.1
     yn = input("\n是否进入命令(Y/n)：")
     if yn != '' and yn != 'y' and yn != 'Y':
@@ -115,7 +148,7 @@ def _cmd_1(linedata, timesec, event, funnamenum, line_range):
             # 绘制全部曲线数据
             for curve in linedata:
                 plt.plot(timesec[line_range[0]:line_range[1]],
-                         curve[line_range[0]:line_range[1]], label=event[count])
+                         curve[line_range[0]:line_range[1]], label=events[count])
                 plt.legend()
                 count += 1
             # 打开图片
@@ -127,9 +160,9 @@ def _cmd_1(linedata, timesec, event, funnamenum, line_range):
             plt.clf()
         elif my_string in parameter_cmd['show_event']:
             # 打印所有事件名
-            print(event)
+            print(events)
         elif my_string in parameter_cmd['show_fun']:
-            #打印所有函数
+            # 打印所有函数
             print()
         elif my_string in parameter_cmd['show_timesec']:
             # 打印时间轴
@@ -139,7 +172,7 @@ def _cmd_1(linedata, timesec, event, funnamenum, line_range):
             os.system('clear')
         elif my_string in parameter_cmd['show_function_count']:
             # 显示数据
-            print(funnamenum)
+            print(stats_array)
         elif my_string in parameter_cmd['help']:
             # 显示帮助
             print(list(parameter_cmd.values()))
@@ -150,31 +183,18 @@ def _cmd_1(linedata, timesec, event, funnamenum, line_range):
         my_string = input(">>")
 
 
-def get_picture(tracedatl, picturefile, time_intervial, one_picture, plot_display, cpus=[], fun_list=[], line_range=[], open_cmd=False):
-    event = np.unique(tracedatl[2])
-    # 创建秒间隔数组
-    timesec = [cutdec(i, 6) for i in np.linspace(cutdec(tracedatl[1][0], 2), cutdec(tracedatl[1][-1], 2)+2*time_intervial,
-                                                 int((cutdec(tracedatl[1][-1], 2)-cutdec(tracedatl[1][0], 2)+2*time_intervial)/time_intervial)+1)]
-    if line_range == []:
-        line_range = [1, len(timesec)-2]  # 两端的统计是不准确的，所以去掉
-    funnamenum = statistical_data(tracedatl, timesec, event)
-    # 将所有cpu上的统计结果相加，获得整个进程的结果
-    allcpufun = sum(funnamenum)
+def get_picture():
     if cpus == []:
-        save_show_picture(allcpufun, timesec, picturefile, event,
+        save_show_picture(allcpu_stats_array, timesec, outputfile, events,
                           line_range, time_intervial, one_picture, plot_display)
     else:
         for i in cpus:
-            save_show_picture(funnamenum[i], timesec, picturefile+'-'+str(
-                i), event, line_range, time_intervial, one_picture, plot_display)
-    if open_cmd:
-        # 进入命令处理程序
-        _cmd_1(allcpufun, timesec, event, funnamenum, line_range)
-
+            save_show_picture(stats_array[i], timesec, outputfile+'-'+str(
+                i), events, line_range, time_intervial, one_picture, plot_display)
 
 def dat2tmp(datfile, tmpfile):
-    #检查文件是否存在
-    datfile_path=Path(datfile)
+    # 检查文件是否存在
+    datfile_path = Path(datfile)
     if not datfile_path.is_file():
         print('文件\''+datfile+'\'不存在')
         exit(1)
@@ -230,25 +250,13 @@ def readvar(varfile):
 # -c | --cpu : 指定cpu
 # -r | --range : 指定范围
 # -v | --varfile : 指定变量文件
-# -e : 指定统计事件
-# -g : 指定统计函数
+# -e : 指定统计事件，以“,”划分，若值为“all”，表示全部事件
+# -g : 指定统计函数，以“,”划分，若值为“all”，表示全部函数
 # --build-tmp ： 仅生成tmp文件
 # --cmd ： 进入命令处理程序
-
-
 def main(argv):
-    inputfile = ''
-    outputfile = ''
-    tmpfile = ''
-    one_picture = True
-    time_intervial = 0.1
-    plot_display = False
-    cpus = []
-    line_range = []
-    open_cmd = False
-    varfile = ''
-    trace_date = []
-    fun_list = []
+    global varfile 
+    global tmpfile
     try:
         opts, args = getopt.getopt(argv, 'ac:dg:r:sht:i:o:S:v:', [
                                    'all', 'cpu=', 'display', 'split', 'help', 'varfile', 'tmpfile=', 'ifile=', 'ofile=', 'Scale', 'build-tmp', 'cmd'])
@@ -293,6 +301,8 @@ def main(argv):
             varfile = arg
         elif opt in ("-g"):
             fun_list = [i for i in arg.split(',')]
+        elif opt in ("-e"):
+            event_list = [i for i in arg.split(',')]
 
     if varfile == '':
         if tmpfile == '':
@@ -301,22 +311,19 @@ def main(argv):
                 exit(1)
             else:
                 filename1 = os.path.splitext(inputfile)[0]
-                tmpfile= filename1+'.tmp'
-                varfile=filename1+'.var'
-                tracedatl = tmp2var(dat2tmp(inputfile,tmpfile),varfile)
+                tmpfile = filename1+'.tmp'
+                varfile = filename1+'.var'
+                tracedatl = tmp2var(dat2tmp(inputfile, tmpfile), varfile)
         else:
             filename1 = os.path.splitext(tmpfile)[0]
-            varfile= filename1+'.var'
-            tracedatl = tmp2var(tmpfile,varfile)
+            varfile = filename1+'.var'
+            tracedatl = tmp2var(tmpfile, varfile)
     filename1 = os.path.splitext(varfile)[0]
     tracedatl = readvar(varfile)
     # 处理输出文件
     if outputfile == '':
-        get_picture(tracedatl, filename1, time_intervial, one_picture,
-                    plot_display, cpus=cpus, fun_list=fun_list, line_range=line_range, open_cmd=open_cmd)
-    else:
-        get_picture(tracedatl, os.path.splitext(outputfile)[
-                    0], time_intervial, one_picture, plot_display, cpus=cpus, fun_list=fun_list, line_range=line_range, open_cmd=open_cmd)
+        filename1 = os.path.splitext(outputfile)[0]
+    get_picture()
 
 
 if __name__ == '__main__':
