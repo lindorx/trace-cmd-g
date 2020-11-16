@@ -7,9 +7,9 @@ import datetime
 import os
 import time
 import pickle
+import re
 from pathlib import Path
 from matplotlib.pyplot import MultipleLocator
-
 
 # 小数截取
 def cutdec(number1, num):
@@ -27,27 +27,38 @@ def process_bar(percent, start_str='', end_str='', total_length=0):
     print(bar, end='', flush=True)
 
 
-#全局变量
-inputfile = ''          #输入文件，后缀名“.dat”
-outputfile = ''         #输出文件，图片，后缀名“.jpg”，指定是无需指定后缀名
-tmpfile = ''            #中间文件，对“.dat”处理过的文件，过滤了不需要的部分
-varfile = ''            #变量文件，保存的主要数据，加快处理速度
-one_picture = True      #如果将所有曲线先是在一个图片中，one_picture = True ，反之，分散到各个图片中
-time_intervial = 0.1    #数据的时间间隔，单位：秒
-plot_display = False    #直接显示处理好的图片
-cpus = []               #cpu数组，指定要处理的cpu
-line_range = [0,0]      #设定范围，line_range[0]表示起始位置，line_range[1]表示终止位置
-open_cmd = False        #启用命令，允许进行实时处理
+# 全局变量
+inputfile = ''  # 输入文件，后缀名“.dat”
+outputfile = ''  # 输出文件，图片，后缀名“.jpg”，指定是无需指定后缀名
+tmpfile = ''  # 中间文件，对“.dat”处理过的文件，过滤了不需要的部分
+varfile = ''  # 变量文件，保存的主要数据，加快处理速度
+one_picture = True  # 如果将所有曲线先是在一个图片中，one_picture = True ，反之，分散到各个图片中
+time_intervial = 0.1  # 数据的时间间隔，单位：秒
+plot_display = False  # 直接显示处理好的图片
+cpus = []  # cpu数组，指定要处理的cpu
+line_range = [0, 0]  # 设定范围，line_range[0]表示起始位置，line_range[1]表示终止位置
+open_cmd = False  # 启用命令，允许进行实时处理
+event_list = []  # 事件列表
+fun_list = []  # 函数列表
+picture_size = [20, 5]  # 图片大小
 
-event_list = []         #事件列表
-fun_list = []           #函数列表
-tracedatl=[]            #tracedatl[0]为cpu数组，数组tracedatl[1]为采样时间的数组，tracedatl[2]为对应的事件
-timesec=[]              #图片x轴的刻度数据
-events=[]               #当前处理的数据包含的全部事件
-stats_array=[]          #处理好的统计数据
-allcpu_stats_array=[]   #所有cpu的合并结果
+only_build_tmp = False
+only_build_var = False
 
-#统计数据
+tracedatl = []  # tracedatl[0]为cpu数组，数组tracedatl[1]为采样时间的数组，tracedatl[2]为对应的事件
+timesec = []  # 图片x轴的刻度数据
+events = []  # 当前处理的数据包含的全部事件名
+events_ascii = []  # 当前处理的数据包含的全部事件名，ascii格式
+use_events_filter_i = []  # 在events_ascii中用event_list过滤出的下标数组
+stats_array = []  # 处理好的统计数据
+allcpu_stats_array = []  # 所有cpu的合并结果
+cpu_number=0
+
+cur_line_data=[]        #当前需要展示曲线数据，cpu_line_data[x]表示一条曲线
+
+# 统计数据
+
+
 def statistical_data():
     # 创建一个二维数组，用于记录每个函数在每秒的执行次数
     stats_array = np.zeros(
@@ -74,81 +85,163 @@ def statistical_data():
     print()
     return stats_array
 
-#变量初始化，部分变量已在main()中初始化
-def init_value():
-    events = np.unique(tracedatl[2])
-    # 创建秒间隔数组
-    timesec = [cutdec(i, 6) for i in np.linspace(cutdec(tracedatl[1][0], 2), cutdec(tracedatl[1][-1], 2)+2*time_intervial,
-            int((cutdec(tracedatl[1][-1], 2)-cutdec(tracedatl[1][0], 2)+2*time_intervial)/time_intervial)+1)]
-        #获取统计数组
-    stats_array = statistical_data()
-    # 将所有cpu上的统计结果相加，获得整个进程的结果
-    allcpu_stats_array = sum(stats_array)
-    if line_range == []:
-        line_range = [1, len(timesec)-2]  #两端的统计是不准确的，所以去掉
-    if open_cmd:
-        # 进入命令处理程序
-        _cmd_1(allcpu_stats_array, timesec, events, stats_array, line_range)
+# 过滤指定数组，返回一个数组，长度与main_array相等，每个元素表示对应main_array元素在filter_array中的位置
 
+
+def filter_array(main_array, filter_array):
+    range_main = len(main_array)
+    range_filter = len(filter_array)
+    ret_array = np.zeros((range_filter), dtype=int, order='C')
+    for i in range(range_main):
+        for j in range(range_filter):
+            if main_array[i] == filter_array[j]:
+                ret_array[j] = i
+                break
+    return ret_array
+
+'''
+cur_figure=plt.figure(figsize=picture_size)     #当前绘图使用的平台
+cur_ax = plt.gca()      #当前axes对象
+
+def setting_picture_x(value):
+    #更新刻度
+    cur_ax.xaxis.set_major_locator(MultipleLocator(value))
 
 # linedata:曲线数据，即y轴；timesec：时间刻度，即x轴
 # outputfile：保存路径；funnames：函数名数组；line_range：x轴范围；time_intervial：时间间隔；one_picture：图形分离标志；plot_display：图形显示标志
 
+def save_picture(x_axis,y_axis,outputfile):
+    for i in use_events_filter_i:
+        plt.plot(x_axis[line_range[0]:line_range[1]],
+                 y_axis[i][line_range[0]:line_range[1]], label=events_ascii[i])
+        plt.legend()
+    outputfile += '.jpg'
+    plt.savefig(outputfile)
+    print('图片保存至\''+outputfile+'\'')
+'''
 
-def save_show_picture(linedata, timesec, outputfile, events, line_range, time_intervial=1, one_picture=True, plot_display=False):
-    #fig, ax = plt.subplots(num=None, figsize=(16, 12), dpi=80, facecolor='w', edgecolor='k')
+def save_show_picture(linedata, timesec, outputfile, events_ascii, use_events_filter_i, line_range, time_intervial=1, one_picture=True, plot_display=False, picture_size=[20, 5]):
     if one_picture:  # 将所有函数曲线放到一起
-        count = 0
-        plt.figure(num=1, figsize=(20, 5))
-        for curve in linedata:
+        plt.figure(figsize=picture_size)
+        for i in use_events_filter_i:
             plt.plot(timesec[line_range[0]:line_range[1]],
-                     curve[line_range[0]:line_range[1]], label=str(events[count], 'ascii'))
+                     linedata[i][line_range[0]:line_range[1]], label=events_ascii[i])
             plt.legend()
-            count += 1
         outputfile += '.jpg'
         plt.savefig(outputfile)
         print('图片保存至\''+outputfile+'\'')
-    else:  # 将函数曲线分为多个图片
-        count = 0
-        for curve in linedata:
-            plt.figure(figsize=(20, 5))
-            plt.title(events[count])
+    else:  # 根据函数/事件名将曲线分为多个图片
+        for i in use_events_filter_i:
+            plt.figure(figsize=picture_size)
+            plt.title(events_ascii[i])
             plt.plot(timesec[line_range[0]:line_range[1]],
-                     curve[line_range[0]:line_range[1]])
-            picture1 = outputfile+'-'+str(events[count], 'ascii')+'.jpg'
+                     linedata[i][line_range[0]:line_range[1]], label=events_ascii[i])
+            picture1 = outputfile+'-'+events_ascii[i]+'.jpg'
             plt.savefig(picture1)
             print('图片保存至\''+picture1+'\'')
-            count += 1
-
-    x_major = MultipleLocator(time_intervial)
-    ax = plt.gca()
-    ax.xaxis.set_major_locator(x_major)
+    # 设置刻度
+    cur_ax = plt.gca() 
+    cur_ax.xaxis.set_major_locator(MultipleLocator(time_intervial))
+    # 展示图片
     if plot_display:
         plt.show()
+    plt.clf()
+    plt.close()
 
+    
 
-parameter_cmd = {'show_picture': ['show'], 'show_timesec': ['timeax', 'ta'],
-                 'show_event': ['events', 'e'], 'show_function_count': ['funs'],
-                 'clear': ['cle', 'clear'], 'help': ['help', 'h'],
-                 'show_fun': ['fun', 'f']}
+parameter_cmd = {'show_picture': ['show'],              #显示图片
+                 'show_timesec': ['timeax', 'ta'],      #显示时间刻度数组
+                 'show_event': ['events', 'e'],         #显示事件列表   
+                 'show_status': ['status'],             #显示统计结果
+                 'clear': ['cle', 'clear'],             #清空窗口
+                 'help': ['help', 'h'],                 #显示帮助
+                 'show_fun': ['fun', 'f'],              #展示函数列表
+                 'setting':['set','s'],                 #对一些变量进行设定
+                 'show_values':['values','v']           #展示所有可以被修改的变量
+}
 
+values_defult={ #此字典用来保存默认值，每调用一次init_cmd_set_values都会将当前值作为默认值
+    'cpus':[],
+    'line_range':[],
+    'event_list':[],
+    'fun_list':[],
+    'picture_size':[],
+    'one_picture':[],
+    'time_intervial':[]
+}
 
-def _cmd_1(linedata, timesec, events, stats_array, line_range):
-    time_intervial = 0.1
+values_cmd={    #此字典用来保存可以设置的变量名
+    'cpus':['cpus'],
+    'line_range':['line_range'],
+    'event_list':['event_list'],
+    'fun_list':['fun_list'],
+    'picture_size':['picture_size'],
+    'one_picture':['one_picture'],
+    'time_intervial':['time_intervial']
+}
+
+def init_cmd_set_values():
+    global values_defult,cpus,line_range,event_list,fun_list,picture_size,one_picture,time_intervial
+    #保存指定变量的默认值，防止出错
+    values_defult['cpus']=cpus
+    values_defult['line_range']=line_range
+    values_defult['event_list']=event_list
+    values_defult['fun_list']=fun_list
+    values_defult['picture_size']=picture_size
+    values_defult['one_picture']=one_picture
+    values_defult['time_intervial']=time_intervial
+
+def check_str_digit_array(narray):
+    #检查narray的每一项是否为数字
+    for i in narray:
+        if not i.isdigit():
+            return False
+    return True
+
+def set_cur_line():
+    #更新当前曲线数据
+    count=0
+
+    cur_line_data=sum()
+
+def setting_value(mystrvararr):
+    global cpus,line_range,picture_size,time_intervial
+    #对一些变量进行设置，mystrarr是一个字符串，需要转换为数组，mystrvar[0]必须为“set”，mystrvar[1]表示要设置的变量名
+    #mystrvar[2]为设置的值
+    if mystrvararr[0]!='set':
+        return
+    mystrvar_number=mystrvararr[2:]
+    if check_str_digit_array(mystrvar_number):  #数组为数字字符串
+        value=[int(i) for i in mystrvar_number]
+        if mystrvararr[1] in values_cmd['cpus']:
+            cpus=value
+        elif mystrvararr[1] in values_cmd['line_range']:
+            line_range=value
+        elif mystrvararr[1] in values_cmd['picture_size']:
+            picture_size=value
+        elif mystrvararr[1] in values_cmd['time_intervial']:
+            time_intervial=value[0]
+    #对变量值进行更新
+    set_cur_line()
+
+def _cmd_1():
+    is_error=False
     yn = input("\n是否进入命令(Y/n)：")
     if yn != '' and yn != 'y' and yn != 'Y':
-        exit(1)
+        return
     print("===========================================================")
     my_string = input(">>")
     while my_string != 'q' and my_string != 'quit':
-        if my_string in parameter_cmd['show_picture']:
+        if my_string == '\n':
+            continue
+        elif my_string in parameter_cmd['show_picture']:
             # 按照默认值展示图片
             count = 0
-            plt.figure(figsize=(20, 5))
             # 绘制全部曲线数据
-            for curve in linedata:
+            for curve in allcpu_stats_array:
                 plt.plot(timesec[line_range[0]:line_range[1]],
-                         curve[line_range[0]:line_range[1]], label=events[count])
+                         curve[line_range[0]:line_range[1]], label=event_list[count])
                 plt.legend()
                 count += 1
             # 打开图片
@@ -156,7 +249,6 @@ def _cmd_1(linedata, timesec, events, stats_array, line_range):
             ax = plt.gca()
             ax.xaxis.set_major_locator(x_major)
             plt.show()
-            plt.close()
             plt.clf()
         elif my_string in parameter_cmd['show_event']:
             # 打印所有事件名
@@ -170,27 +262,64 @@ def _cmd_1(linedata, timesec, events, stats_array, line_range):
         elif my_string in parameter_cmd['clear']:
             # 清空屏幕
             os.system('clear')
-        elif my_string in parameter_cmd['show_function_count']:
+        elif my_string in parameter_cmd['show_status']:
             # 显示数据
             print(stats_array)
         elif my_string in parameter_cmd['help']:
             # 显示帮助
             print(list(parameter_cmd.values()))
-        elif my_string == '\n':
-            continue
+        elif my_string in parameter_cmd['show_values']:
+            print()
         else:
+            my_string_array=re.split('[\\s|,|=]',my_string)
+            if len(my_string_array) < 2:
+                is_error=True
+            elif my_string_array[0] in parameter_cmd['setting']:
+                #设置变量
+                setting_value(my_string_array)
+            else:
+                is_error=True
+        if is_error:
+            is_error=False
             print("命令不合法！")
         my_string = input(">>")
 
 
 def get_picture():
     if cpus == []:
-        save_show_picture(allcpu_stats_array, timesec, outputfile, events,
+        save_show_picture(allcpu_stats_array, timesec, outputfile, events_ascii, use_events_filter_i,
                           line_range, time_intervial, one_picture, plot_display)
-    else:
+    else:  # 按cpus数组生成
         for i in cpus:
             save_show_picture(stats_array[i], timesec, outputfile+'-'+str(
-                i), events, line_range, time_intervial, one_picture, plot_display)
+                i), events_ascii, use_events_filter_i, line_range, time_intervial, one_picture, plot_display)
+
+# 变量初始化，部分变量已在main()中初始化
+
+
+def init_value():
+    global events, events_ascii,event_list, use_events_filter_i, timesec, stats_array, allcpu_stats_array, line_range
+    events = np.unique(tracedatl[2])
+    events_ascii = [str(i, 'ascii') for i in events]
+    if event_list==[]:      #用户未指定事件列表，那生成全部事件列表
+        event_list=events_ascii
+        use_events_filter_i=[i for i in range(len(event_list))]
+    else:
+        use_events_filter_i = filter_array(events_ascii, event_list)
+    # 创建秒间隔数组
+    timesec = [cutdec(i, 6) for i in np.linspace(cutdec(tracedatl[1][0], 2), cutdec(tracedatl[1][-1], 2)+2*time_intervial,
+                                                 int((cutdec(tracedatl[1][-1], 2)-cutdec(tracedatl[1][0], 2)+2*time_intervial)/time_intervial)+1)]
+    # 获取统计数组
+    stats_array = statistical_data()
+    # 将所有cpu上的统计结果相加，获得整个进程的结果
+    allcpu_stats_array = sum(stats_array)
+    if line_range == [0, 0]:
+        line_range = [1, len(timesec)-2]  # 两端的统计是不准确的，所以去掉
+    get_picture()
+    if open_cmd:
+        # 进入命令处理程序
+        _cmd_1()
+
 
 def dat2tmp(datfile, tmpfile):
     # 检查文件是否存在
@@ -201,12 +330,16 @@ def dat2tmp(datfile, tmpfile):
     start = datetime.datetime.now()
     # 使用shell将trace-cmd采样的数据转换为可识别的格式
     print("生成临时文件中。。。")
-    shell_script = 'trace-cmd report -i '+datfile + \
-        ' | awk \'match($0,/\\[(...)\\].+(....\\.......): (.+): .+/,a){printf(\"%s %s %s\\n\",a[1],a[2],a[3])}\' > ' + tmpfile
-    os.system(shell_script)
+    shell_script0='trace-cmd report -i '+datfile+' | head -n1 >' + tmpfile
+    shell_script1 = 'trace-cmd report -i '+datfile + \
+        ' | awk \'match($0,/\\[(...)\\].+(....\\.......): (.+): .+/,a){printf(\"%s %s %s\\n\",a[1],a[2],a[3])}\' >> ' + tmpfile
+    os.system(shell_script0)
+    os.system(shell_script1)
     end = datetime.datetime.now()
     print("临时文件保存于\'"+tmpfile+'\' 花费时间' +
           str((end-start).total_seconds())+'秒')
+    if only_build_tmp:
+        exit(0)
     return tmpfile
 
 # 将读取的文件转换为数组变量存入文件，以加快读取速度
@@ -217,6 +350,9 @@ def tmp2var(tmpfile, varfile):
     print("整理数据中。。。")
     try:
         with open(tmpfile, 'rb') as fin:
+            #读取第一行cpu数量
+            print(fin.readline())
+
             tracedatl = list(
                 zip(*([[int(i.split()[0]), float(i.split()[1]), i.split()[2]] for i in fin])))
             with open(varfile, 'wb') as varfout:
@@ -224,6 +360,8 @@ def tmp2var(tmpfile, varfile):
     except OSError as fileerror:
         print("文件打开失败：\'")
         print(fileerror)
+    if only_build_var:
+        exit(0)
     return tracedatl
 
 
@@ -252,14 +390,22 @@ def readvar(varfile):
 # -v | --varfile : 指定变量文件
 # -e : 指定统计事件，以“,”划分，若值为“all”，表示全部事件
 # -g : 指定统计函数，以“,”划分，若值为“all”，表示全部函数
-# --build-tmp ： 仅生成tmp文件
+# --only-build-tmp ：仅生成tmp文件
+# --only-build-var : 仅生成var文件
 # --cmd ： 进入命令处理程序
+
+
+main_options = 'ac:de:g:r:sht:i:o:S:v:'
+main_options_name = ['all', 'cpu=', 'display', 'split', 'help', 'varfile', 'tmpfile=',
+                     'ifile=', 'ofile=', 'Scale', 'only-build-tmp', 'only-build-var', 'cmd']
+
+
 def main(argv):
-    global varfile 
-    global tmpfile
+    global inputfile, outputfile, tmpfile, varfile, one_picture, time_intervial, plot_display, cpus
+    global line_range, open_cmd, fun_list, event_list, tracedatl, main_options, main_options_name
+    global only_build_tmp,only_build_var
     try:
-        opts, args = getopt.getopt(argv, 'ac:dg:r:sht:i:o:S:v:', [
-                                   'all', 'cpu=', 'display', 'split', 'help', 'varfile', 'tmpfile=', 'ifile=', 'ofile=', 'Scale', 'build-tmp', 'cmd'])
+        opts, args = getopt.getopt(argv, main_options, main_options_name)
     except getopt.GetoptError as error:
         # 未找到参数
         print(error)
@@ -273,6 +419,8 @@ def main(argv):
             inputfile = arg
         elif opt in ("-o", "--ofile"):
             outputfile = arg
+        elif opt in ("-v", "--varfile"):
+            varfile = arg
         elif opt in ("-a", "--all"):
             one_picture = True
         elif opt in ("-s", "--split"):
@@ -290,15 +438,12 @@ def main(argv):
             if len(line_range) > 2:
                 print("'-r'只能指定两个参数： -r 起始下标,结束下标")
                 exit(5)
-        elif opt in ("--build-tmp"):
-            if inputfile != '':
-                tmpfile = os.path.splitext(inputfile)[0]+'.tmp'
-                dat2tmp(inputfile, tmpfile)
-                exit(0)
+        elif opt in ("--only-build-tmp"):
+            only_build_tmp=True
+        elif opt in ("--only-build-var"):
+            only_build_var=True
         elif opt in ("--cmd"):
             open_cmd = True
-        elif opt in ("-v", "--varfile"):
-            varfile = arg
         elif opt in ("-g"):
             fun_list = [i for i in arg.split(',')]
         elif opt in ("-e"):
@@ -320,10 +465,9 @@ def main(argv):
             tracedatl = tmp2var(tmpfile, varfile)
     filename1 = os.path.splitext(varfile)[0]
     tracedatl = readvar(varfile)
-    # 处理输出文件
     if outputfile == '':
-        filename1 = os.path.splitext(outputfile)[0]
-    get_picture()
+        outputfile = filename1
+    init_value()
 
 
 if __name__ == '__main__':

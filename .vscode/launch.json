@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "-i","123.dat"
+                "-i","test/test.dat","-d"
             ]
         }
     ]
