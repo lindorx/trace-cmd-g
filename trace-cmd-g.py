@@ -226,7 +226,7 @@ values_cmd = {  # 此字典用来保存可以设置的变量名
 }
 
 
-def update_cmd_default():      #每调用一次 update_cmd_default 都会保存当前值作为默认值
+def update_cmd_default():  # 每调用一次 update_cmd_default 都会保存当前值作为默认值
     global values_defult, cpu_list, line_range, event_list, fun_list, picture_size, one_picture, time_intervial
     # 保存指定变量的默认值，防止出错
     values_defult['cpu_list'] = cpu_list
@@ -364,7 +364,7 @@ def init_value():
     allcpu_stats_array = update_allcpu_stats_array(stats_array, cpu_list)
     # 保存数据
     print('保存var数据到\''+varfile+'\'')
-    if not save_var([tracedatl, stats_array,cpu_number], varfile):
+    if not save_var([tracedatl, stats_array, cpu_number], varfile):
         return
     if line_range == [0, 0]:
         line_range = [1, len(timesec)-2]  # 两端的统计是不准确的，所以用line_range限制显示范围
@@ -404,17 +404,22 @@ def dat2tmp(datfile, tmpfile):
     if only_build_tmp:
         exit(0)
     return tmpfile
+
+
 '''
 def shrink_data(tracedatl):  #缩小数据的体积
     #首先检索一遍
 '''
+
+
 def tmp2var(tmpfile, varfile):
     global cpu_number
     print("整理数据中。。。")
     try:
         with open(tmpfile, 'rb') as fin:
             # 读取第一行cpu数量
-            str_tmp = re.findall('cpu_list=(\\d*)', str(fin.readline(), 'ascii'))
+            str_tmp = re.findall(
+                'cpu_list=(\\d*)', str(fin.readline(), 'ascii'))
             if str_tmp != []:
                 cpu_number = int(str_tmp[0])
             tracedatl = list(
