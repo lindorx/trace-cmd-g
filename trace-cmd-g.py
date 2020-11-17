@@ -37,7 +37,7 @@ varfile = ''  # 变量文件，保存的主要数据，加快处理速度
 one_picture = True  # 如果将所有曲线先是在一个图片中，one_picture = True ，反之，分散到各个图片中
 time_intervial = 0.1  # 数据的时间间隔，单位：秒
 plot_display = False  # 直接显示处理好的图片
-cpus = []  # cpu数组，指定要处理的cpu
+cpu_list = []  # cpu数组，指定要处理的cpu
 line_range = [0, 0]  # 设定范围，line_range[0]表示起始位置，line_range[1]表示终止位置
 open_cmd = False  # 启用命令，允许进行实时处理
 event_list = []  # 事件列表
@@ -205,8 +205,8 @@ parameter_cmd = {'show_picture': ['show'],  # 显示图片
                  'show_values': ['values', 'v']  # 展示所有可以被修改的变量
                  }
 
-values_defult = {  # 此字典用来保存默认值，每调用一次init_cmd_set_values都会将当前值作为默认值
-    'cpus': [],
+values_defult = {  # 此字典用来保存默认值
+    'cpu_list': [],
     'line_range': [],
     'event_list': [],
     'fun_list': [],
@@ -216,7 +216,7 @@ values_defult = {  # 此字典用来保存默认值，每调用一次init_cmd_se
 }
 
 values_cmd = {  # 此字典用来保存可以设置的变量名
-    'cpus': ['cpus'],
+    'cpu_list': ['cpu_list'],
     'line_range': ['line_range'],
     'event_list': ['event_list'],
     'fun_list': ['fun_list'],
@@ -226,10 +226,10 @@ values_cmd = {  # 此字典用来保存可以设置的变量名
 }
 
 
-def init_cmd_set_values():
-    global values_defult, cpus, line_range, event_list, fun_list, picture_size, one_picture, time_intervial
+def update_cmd_default():      #每调用一次 update_cmd_default 都会保存当前值作为默认值
+    global values_defult, cpu_list, line_range, event_list, fun_list, picture_size, one_picture, time_intervial
     # 保存指定变量的默认值，防止出错
-    values_defult['cpus'] = cpus
+    values_defult['cpu_list'] = cpu_list
     values_defult['line_range'] = line_range
     values_defult['event_list'] = event_list
     values_defult['fun_list'] = fun_list
@@ -238,16 +238,16 @@ def init_cmd_set_values():
     values_defult['time_intervial'] = time_intervial
 
 
-def check_str_digit_array(narray):
+def check_str_digit_array(numarray):
     # 检查narray的每一项是否为数字
-    for i in narray:
+    for i in numarray:
         if not i.isdigit():
             return False
     return True
 
 
 def setting_value(mystrvararr):
-    global cpus, line_range, picture_size, time_intervial
+    global cpu_list, line_range, picture_size, time_intervial
     # 对一些变量进行设置，mystrarr是一个字符串，需要转换为数组，mystrvar[0]必须为“set”，mystrvar[1]表示要设置的变量名
     # mystrvar[2]为设置的值
     if mystrvararr[0] != 'set':
@@ -255,8 +255,8 @@ def setting_value(mystrvararr):
     mystrvar_number = mystrvararr[2:]
     if check_str_digit_array(mystrvar_number):  # 数组为数字字符串
         value = [int(i) for i in mystrvar_number]
-        if mystrvararr[1] in values_cmd['cpus']:
-            cpus = value
+        if mystrvararr[1] in values_cmd['cpu_list']:
+            cpu_list = value
         elif mystrvararr[1] in values_cmd['line_range']:
             line_range = value
         elif mystrvararr[1] in values_cmd['picture_size']:
@@ -328,22 +328,23 @@ def _cmd_1():
 
 '''
 def get_picture():
-    if cpus == []:
+    if cpu_list == []:
         save_show_picture(allcpu_stats_array, timesec, outputfile, events_ascii, use_events_filter_i,
                           line_range, time_intervial, one_picture, plot_display)
-    else:  # 按cpus数组生成
-        for i in cpus:
+    else:  # 按cpu_list数组生成
+        for i in cpu_list:
             save_show_picture(stats_array[i], timesec, outputfile+'-'+str(
                 i), events_ascii, use_events_filter_i, line_range, time_intervial, one_picture, plot_display)
 '''
 
-def update_allcpu_stats_array(my_stats_array, cpu_list):  # 更新all_stats_array数组
-    retarray = sum([my_stats_array[i] for i in cpu_list])
+
+def update_allcpu_stats_array(my_stats_array, cpul):  # 更新all_stats_array数组
+    retarray = sum([my_stats_array[i] for i in cpul])
     return retarray
 
 
 def init_value():
-    global events, cpus, events_ascii, event_list, use_events_filter_i, timesec, stats_array, allcpu_stats_array, line_range
+    global events, cpu_list, events_ascii, event_list, use_events_filter_i, timesec, stats_array, allcpu_stats_array, line_range
     events = np.unique(tracedatl[2])
     events_ascii = [str(i, 'ascii') for i in events]
     if event_list == []:  # 用户未指定事件列表，那生成全部事件列表
@@ -351,8 +352,8 @@ def init_value():
         use_events_filter_i = [i for i in range(len(event_list))]
     else:
         use_events_filter_i = filter_array(events_ascii, event_list)
-    if cpus == []:  # 没有指定cpu,则使用全部cpu
-        cpus = [i for i in range(cpu_number)]
+    if cpu_list == []:  # 没有指定cpu,则使用全部cpu
+        cpu_list = [i for i in range(cpu_number)]
     # 创建秒间隔数组
     timesec = [cutdec(i, 6) for i in np.linspace(cutdec(tracedatl[1][0], 2), cutdec(tracedatl[1][-1], 2)+2*time_intervial,
                                                  int((cutdec(tracedatl[1][-1], 2)-cutdec(tracedatl[1][0], 2)+2*time_intervial)/time_intervial)+1)]
@@ -360,7 +361,11 @@ def init_value():
     stats_array = statistical_data()
     # 将所有cpu上的统计结果相加，获得整个进程的结果
     #allcpu_stats_array = sum(stats_array)
-    allcpu_stats_array = update_allcpu_stats_array(stats_array, cpus)
+    allcpu_stats_array = update_allcpu_stats_array(stats_array, cpu_list)
+    # 保存数据
+    print('保存var数据到\''+varfile+'\'')
+    if not save_var([tracedatl, stats_array,cpu_number], varfile):
+        return
     if line_range == [0, 0]:
         line_range = [1, len(timesec)-2]  # 两端的统计是不准确的，所以用line_range限制显示范围
     if one_picture:
@@ -399,15 +404,17 @@ def dat2tmp(datfile, tmpfile):
     if only_build_tmp:
         exit(0)
     return tmpfile
-
-
+'''
+def shrink_data(tracedatl):  #缩小数据的体积
+    #首先检索一遍
+'''
 def tmp2var(tmpfile, varfile):
     global cpu_number
     print("整理数据中。。。")
     try:
         with open(tmpfile, 'rb') as fin:
             # 读取第一行cpu数量
-            str_tmp = re.findall('cpus=(\\d*)', str(fin.readline(), 'ascii'))
+            str_tmp = re.findall('cpu_list=(\\d*)', str(fin.readline(), 'ascii'))
             if str_tmp != []:
                 cpu_number = int(str_tmp[0])
             tracedatl = list(
@@ -434,6 +441,7 @@ def tmp2var(tmpfile, varfile):
 # -c | --cpu : 指定cpu
 # -r | --range : 指定范围
 # -v | --varfile : 指定变量文件
+# -l ：对目标文件缩小体积
 # -e : 指定统计事件，以“,”划分，若值为“all”，表示全部事件
 # -g : 指定统计函数，以“,”划分，若值为“all”，表示全部函数
 # --only-build-tmp ：仅生成tmp文件
@@ -447,7 +455,7 @@ main_options_name = ['all', 'cpu=', 'display', 'split', 'help', 'varfile', 'tmpf
 
 
 def main(argv):
-    global inputfile, outputfile, tmpfile, varfile, one_picture, time_intervial, plot_display, cpus
+    global inputfile, outputfile, tmpfile, varfile, one_picture, time_intervial, plot_display, cpu_list
     global line_range, open_cmd, fun_list, event_list, tracedatl, cpu_number
     global only_build_tmp, only_build_var
     try:
@@ -478,7 +486,7 @@ def main(argv):
         elif opt in ("-d", "--display"):
             plot_display = True
         elif opt in ("-c", "--cpu"):
-            cpus = [int(i) for i in arg.split(',')]
+            cpu_list = [int(i) for i in arg.split(',')]
         elif opt in ("-r", "--range"):
             line_range = [int(i) for i in arg.split(',')]
             if len(line_range) > 2:
@@ -513,11 +521,6 @@ def main(argv):
         return
     if tracedatl == []:
         tracedatl, cpu_number = readvar(varfile)
-    else:
-        # 保存数据
-        print('保存var数据到\''+varfile+'\'')
-        if not save_var([tracedatl, cpu_number], varfile):
-            return
     if filename1 == '':
         filename1 = os.path.splitext(varfile)[0]
     if outputfile == '':
