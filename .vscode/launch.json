@@ -12,7 +12,10 @@
             "console": "integratedTerminal",
             "args": [
                 "-v","test/test.var","-d"
-            ]
+            ],
+            "env": {
+                "PYTHONPATH":"./test/code"
+            }
         }
     ]
 }
